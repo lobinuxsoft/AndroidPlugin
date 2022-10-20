@@ -1,6 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using System.Text;
+using System.Xml;
 using TMPro;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -8,9 +12,8 @@ public class PluginTest : MonoBehaviour
 {
     [SerializeField] TextMeshProUGUI textMesh;
     [SerializeField] TMP_InputField inputField;
-    [SerializeField] Button loadButton;
-    [SerializeField] Button saveButton;
     [SerializeField] Button clearButton;
+    [SerializeField] Button saveButton;
     [SerializeField] Scrollbar scrollbar;
 
     LoggerBase logger;
@@ -21,13 +24,15 @@ public class PluginTest : MonoBehaviour
 
         inputField.onSubmit.AddListener(SendLog);
         clearButton.onClick.AddListener(ClearLog);
-
-        loadButton.onClick.AddListener(LoadLogs);
-        saveButton.onClick.AddListener(SaveLogs);
+        saveButton.onClick.AddListener(SaveLog);
 
         Application.logMessageReceived += OnLogMessageReceived;
     }
 
+    private void Start()
+    {
+        StartCoroutine(ShowLogs());
+    }
 
     private void SendLog(string message)
     {
@@ -43,18 +48,11 @@ public class PluginTest : MonoBehaviour
 
         StartCoroutine(ShowLogs());
     }
-
-    private void LoadLogs() 
-    { 
-        logger.LoadLogs();
-        StartCoroutine(ShowLogs());
-    }
-
-    private void SaveLogs() 
+    private void SaveLog()
     {
         logger.SaveLogs();
-        StartCoroutine(ShowLogs());
     }
+
 
     IEnumerator ShowLogs()
     {
@@ -73,7 +71,13 @@ public class PluginTest : MonoBehaviour
         scrollbar.value = 0;
     }
 
-    private void OnDestroy() => Application.logMessageReceived -= OnLogMessageReceived;
+    private void OnDestroy()
+    {
+        if (logger != null)
+            logger = null;
+
+        Application.logMessageReceived -= OnLogMessageReceived;
+    }
 
     private void OnLogMessageReceived(string condition, string stackTrace, LogType type)
     {
@@ -106,18 +110,16 @@ public abstract class LoggerBase
 
     public abstract string GetLogs();
 
-    public abstract void ClearLogs();
-
     public abstract void SaveLogs();
 
-    public abstract void LoadLogs();
+    public abstract void ClearLogs();
 
     public static LoggerBase CreateLogger()
     {
 #if UNITY_ANDROID
-        return new AndroidLogger();
+        return new AndroidLogger($"{Application.persistentDataPath}/Log.txt");
 #else
-        return new DefaultLogger();
+        return new DefaultLogger($"{Application.persistentDataPath}/Log.txt");
 #endif
     }
 }
@@ -129,46 +131,50 @@ public class AndroidLogger : LoggerBase
     AndroidJavaClass loggerClass;
     AndroidJavaObject loggerObject;
 
-    public AndroidLogger()
+    public AndroidLogger(string filepath)
     {
         loggerClass = new AndroidJavaClass(pluginName);
-        loggerObject = loggerClass.CallStatic<AndroidJavaObject>("getInstance");
+        loggerObject = loggerClass.CallStatic<AndroidJavaObject>("getInstance", filepath);
+    }
+
+    ~AndroidLogger()
+    {
+        loggerObject.Call("saveLog");
     }
 
     public override void ClearLogs() => loggerObject.Call("clearLogs");
 
     public override string GetLogs() => loggerObject.Call<string>("getLogs");
 
-    public override void LoadLogs()
-    {
-        Debug.LogException(new System.NotImplementedException());
-    }
-
     public override void Log(string message) => loggerObject.Call("sendLog", $"{message}\n");
 
-    public override void SaveLogs()
-    {
-        Debug.LogException(new System.NotImplementedException());
-    }
+    public override void SaveLogs() => loggerObject.Call("saveLog");
 }
 
 public class DefaultLogger : LoggerBase
 {
-    private string logs = "";
+    private string filepath;
+
+    private string logs;
+
+    public DefaultLogger(string filepath)
+    {
+        this.filepath = filepath;
+
+        if(File.Exists(filepath))
+            logs = File.ReadAllText(filepath);
+    }
+
+    ~DefaultLogger() => File.WriteAllText(filepath, logs);
 
     public override void ClearLogs() => logs = "";
 
     public override string GetLogs() => logs;
 
-    public override void LoadLogs()
-    {
-        Debug.LogException(new System.NotImplementedException());
-    }
-
     public override void Log(string message) => logs += $"{message}\n";
 
     public override void SaveLogs()
     {
-        Debug.LogException(new System.NotImplementedException());
+        throw new System.NotImplementedException();
     }
 }
