@@ -1,5 +1,8 @@
 package com.cryingonion.logger;
 
+import android.app.Activity;
+import android.app.AlertDialog;
+import android.content.DialogInterface;
 import android.util.Log;
 
 import java.io.File;
@@ -10,12 +13,21 @@ import java.io.IOException;
 
 public class Logger
 {
+    private static final String LOGTAG = "Crying Onion";
+
     static String filepath;
     static String logs = "";
+    static File file;
 
     private static final Logger ourInstance = new Logger();
 
-    private static final String LOGTAG = "Crying Onion";
+    private static Activity unityActivity;
+    AlertDialog.Builder builder;
+
+    private Logger()
+    {
+        Log.i(LOGTAG, "Created Logger Plugin");
+    }
 
     public static Logger getInstance(String path)
     {
@@ -24,6 +36,48 @@ public class Logger
         loadLog();
 
         return  ourInstance;
+    }
+
+    public static void receiveUnityActivity(Activity tActivity)
+    {
+        unityActivity = tActivity;
+    }
+
+    public void createAlert(String title, String message, AlertCallback alertCallback)
+    {
+        builder = new AlertDialog.Builder(unityActivity);
+        builder.setTitle(title);
+        builder.setMessage(message);
+        builder.setCancelable(false);
+        builder.setPositiveButton(
+                "YES",
+                new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Log.i(LOGTAG, "Clicked from plugin - YES");
+                        alertCallback.onPositive();
+                        dialog.cancel();
+                    }
+                }
+        );
+
+        builder.setNegativeButton(
+                "NO",
+                new DialogInterface.OnClickListener() {
+                    @Override
+                    public void onClick(DialogInterface dialog, int which) {
+                        Log.i(LOGTAG, "Clicked from plugin - NO");
+                        alertCallback.onNegative();
+                        dialog.cancel();
+                    }
+                }
+        );
+    }
+
+    public void showAlert()
+    {
+        AlertDialog alert = builder.create();
+        alert.show();
     }
 
     public void sendLog(String message)
@@ -35,6 +89,7 @@ public class Logger
     public String getLogs()
     {
         Log.i(LOGTAG, "All Logs are returned!");
+
         return logs;
     }
 
@@ -74,9 +129,10 @@ public class Logger
 
     public void saveLog()
     {
-        File file = new File(filepath);
-
-        file.delete();
+        if(file == null)
+            file = new File(filepath);
+        else
+            file.delete();
 
         try {
             if(file.createNewFile()) {
@@ -98,13 +154,9 @@ public class Logger
 
     public void clearLogs()
     {
-        // TODO armar el popup para tomar la decicion de borrar o no los logs
-        Log.i(LOGTAG, "All Logs are cleared!");
         logs = "";
-    }
+        file.delete();
 
-    private Logger()
-    {
-        Log.i(LOGTAG, "Created Logger Plugin");
+        Log.i(LOGTAG, "All Logs are cleared!");
     }
 }

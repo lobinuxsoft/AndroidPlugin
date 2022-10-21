@@ -1,10 +1,7 @@
+using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
-using System.Xml;
 using TMPro;
-using UnityEditor;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -22,6 +19,8 @@ public class PluginTest : MonoBehaviour
     {
         logger = LoggerBase.CreateLogger();
 
+        logger.textMesh = textMesh;
+
         inputField.onSubmit.AddListener(SendLog);
         clearButton.onClick.AddListener(ClearLog);
         saveButton.onClick.AddListener(SaveLog);
@@ -29,45 +28,29 @@ public class PluginTest : MonoBehaviour
         Application.logMessageReceived += OnLogMessageReceived;
     }
 
-    private void Start()
-    {
-        StartCoroutine(ShowLogs());
-    }
+    private void Start() => StartCoroutine(ShowLogs());
 
     private void SendLog(string message)
     {
         Debug.Log(message);
         inputField.text = "";
-
-        StartCoroutine(ShowLogs());
     }
 
     private void ClearLog()
     {
         logger.ClearLogs();
-
-        StartCoroutine(ShowLogs());
-    }
-    private void SaveLog()
-    {
-        logger.SaveLogs();
     }
 
+    private void SaveLog() => logger.SaveLogs();
 
     IEnumerator ShowLogs()
     {
-        string[] logs = logger.GetLogs().Split('\n');
-
-        textMesh.text = "";
-
-        for (int i = 0; i < logs.Length; i++)
-        {
-            textMesh.text += $"{logs[i]}\n";
-        }
+        logger.ShowLogs();
 
         LayoutRebuilder.ForceRebuildLayoutImmediate((RectTransform)textMesh.transform.parent);
 
         yield return new WaitForEndOfFrame();
+
         scrollbar.value = 0;
     }
 
@@ -101,14 +84,18 @@ public class PluginTest : MonoBehaviour
         logger.Log(
             $"<b><color=#{ColorUtility.ToHtmlStringRGB(color)}>[{type.ToString()}]</color></b>: {condition}."
         );
+
+        StartCoroutine(ShowLogs());
     }
 }
 
 public abstract class LoggerBase
 {
+    public TextMeshProUGUI textMesh;
+
     public abstract void Log(string message);
 
-    public abstract string GetLogs();
+    public abstract void ShowLogs();
 
     public abstract void SaveLogs();
 
@@ -127,28 +114,67 @@ public abstract class LoggerBase
 public class AndroidLogger : LoggerBase
 {
     const string pluginName = "com.cryingonion.logger.Logger";
+    const string interfaceName = "com.cryingonion.logger.AlertCallback";
+
+    public class AlertCallback : AndroidJavaProxy
+    {
+        public Action positiveAction;
+        public Action negativeAction;
+
+        public AlertCallback() : base(interfaceName) { }
+
+        public void onPositive() => positiveAction?.Invoke();
+
+        public void onNegative() => negativeAction?.Invoke();
+    }
 
     AndroidJavaClass loggerClass;
     AndroidJavaObject loggerObject;
 
+    string filepath;
+
     public AndroidLogger(string filepath)
     {
+        this.filepath = filepath;
+
+        AndroidJavaClass playerClass = new AndroidJavaClass("com.unity3d.player.UnityPlayer");
+        AndroidJavaObject activity = playerClass.GetStatic<AndroidJavaObject>("currentActivity");
+
         loggerClass = new AndroidJavaClass(pluginName);
         loggerObject = loggerClass.CallStatic<AndroidJavaObject>("getInstance", filepath);
+
+        loggerObject.CallStatic("receiveUnityActivity", activity);
+
+        Debug.Log($"Activity: {activity}");
     }
 
-    ~AndroidLogger()
+    public override void ClearLogs() 
     {
-        loggerObject.Call("saveLog");
+        ShowAlert("Clear Logs and delete Logs.txt", "Are you sure?", () =>
+        {
+            loggerObject.Call("clearLogs");
+            textMesh.text = "";
+        });
     }
 
-    public override void ClearLogs() => loggerObject.Call("clearLogs");
-
-    public override string GetLogs() => loggerObject.Call<string>("getLogs");
+    public override void ShowLogs() => textMesh.text = loggerObject.Call<string>("getLogs");
 
     public override void Log(string message) => loggerObject.Call("sendLog", $"{message}\n");
 
-    public override void SaveLogs() => loggerObject.Call("saveLog");
+    public override void SaveLogs()
+    {
+        ShowAlert("Save logs", $"The logs will be saved in {filepath}", () => loggerObject.Call("saveLog"));
+    }
+
+    private void ShowAlert(string title, string message, Action positive = null, Action negative = null)
+    {
+        AlertCallback alertCallback = new AlertCallback();
+        alertCallback.positiveAction = positive;
+        alertCallback.negativeAction = negative;
+
+        loggerObject.Call("createAlert", new object[] { title, message, alertCallback });
+        loggerObject.Call("showAlert");
+    }
 }
 
 public class DefaultLogger : LoggerBase
@@ -165,16 +191,19 @@ public class DefaultLogger : LoggerBase
             logs = File.ReadAllText(filepath);
     }
 
-    ~DefaultLogger() => File.WriteAllText(filepath, logs);
+    public override void ClearLogs() 
+    {
+        logs = "";
 
-    public override void ClearLogs() => logs = "";
+        textMesh.text = "";
 
-    public override string GetLogs() => logs;
+        if(File.Exists(filepath))
+            File.Delete(filepath);
+    }
+
+    public override void ShowLogs() => textMesh.text = logs;
 
     public override void Log(string message) => logs += $"{message}\n";
 
-    public override void SaveLogs()
-    {
-        throw new System.NotImplementedException();
-    }
+    public override void SaveLogs() => File.WriteAllText(filepath, logs);
 }
